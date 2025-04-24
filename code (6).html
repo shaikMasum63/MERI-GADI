@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Car Race Game - Enhanced Scenery</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            background-color: #1E1E2F; /* Dark Navy background */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #gameContainer {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #uiContainer {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #FFD700; /* Gold */
+            background-color: rgba(43, 45, 66, 0.7); /* Semi-transparent Deep Blue */
+            padding: 10px 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+            z-index: 10;
+        }
+        #score {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        #gameOverScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #FFD700;
+            background-color: rgba(30, 30, 47, 0.9); /* Darker Navy */
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            display: none; /* Hidden by default */
+            box-shadow: 0 5px 15px rgba(255, 215, 0, 0.2);
+            z-index: 10;
+        }
+        #gameOverScreen h2 {
+            margin-bottom: 15px;
+            font-size: 2em;
+            color: #ff6b6b; /* Reddish color for game over */
+        }
+        #gameOverScreen p {
+            font-size: 1.2em;
+            margin-bottom: 20px;
+        }
+        #restartButton {
+            background-color: #FFD700; /* Gold */
+            color: #1E1E2F; /* Dark Navy */
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        #restartButton:hover {
+            background-color: #E6C200; /* Deeper Gold */
+        }
+    </style>
+</head>
+<body>
+    <div id="uiContainer">
+        Score: <span id="score">0</span>
+    </div>
+
+    <div id="gameOverScreen">
+        <h2>Game Over!</h2>
+        <p>Your Score: <span id="finalScore">0</span></p>
+        <button id="restartButton">Restart Game</button>
+    </div>
+
+    <div id="gameContainer"></div>
+
+    <!-- Include Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- Basic Setup ---
+        let scene, camera, renderer;
+        let playerCar;
+        let gameSpeed = 0.5;
+        let score = 0;
+        let isGameOver = false;
+
+        const scoreElement = document.getElementById('score');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreElement = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+
+        const roadWidth = 20;
+        const roadLength = 300; // Length of a single road segment for looping
+        const grassWidth = 50; // How far the grass extends sideways
+        const buildingSpawnDistance = 150;
+        const enemySpawnDistance = 80;
+        const pointSpawnDistance = 50;
+
+        let keys = { left: false, right: false };
+
+        // Store game objects in arrays for easier management
+        let roadSegments = [];
+        let centerLines = [];
+        let edgeStripsLeft = [];
+        let edgeStripsRight = [];
+        let grassSegmentsLeft = []; // NEW: Grass L
+        let grassSegmentsRight = []; // NEW: Grass R
+        let buildings = [];
+        let streetLights = [];
+        let trafficLights = [];
+        let enemyCars = [];
+        let points = [];
+        let trees = []; // NEW: Trees array
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Lighter Sky Blue background
+            scene.fog = new THREE.Fog(0x87CEEB, 100, 350); // Match fog to background
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 6, 18); // Slightly higher/further back
+            camera.lookAt(0, 2, 0); // Look slightly down
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Softer shadows
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xcccccc); // Brighter ambient
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); // Stronger sun
+            directionalLight.position.set(80, 100, 50);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048; // Higher res shadows
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 500;
+            directionalLight.shadow.camera.left = -100;
+            directionalLight.shadow.camera.right = 100;
+            directionalLight.shadow.camera.top = 100;
+            directionalLight.shadow.camera.bottom = -100;
+            scene.add(directionalLight);
+             // const shadowHelper = new THREE.CameraHelper( directionalLight.shadow.camera ); // Optional: Visualize shadow camera
+            // scene.add( shadowHelper );
+
+
+            // --- Create Game Elements ---
+            createPlayerCar();
+            createInitialRoadAndGrass(); // Modified function name
+            createInitialScenery();
+
+            // --- Event Listeners ---
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            window.addEventListener('resize', onWindowResize);
+            restartButton.addEventListener('click', restartGame);
+
+            // Start the game loop
+            animate();
+        }
+
+        // --- Object Creation ---
+
+        function createRoadSegment(zPosition) {
+            // Main Road Surface
+            const roadGeometry = new THREE.PlaneGeometry(roadWidth, roadLength);
+            const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide }); // Slightly lighter Grey road
+            const segment = new THREE.Mesh(roadGeometry, roadMaterial);
+            segment.rotation.x = -Math.PI / 2;
+            segment.position.set(0, 0, zPosition); // Y = 0 for ground level
+            segment.receiveShadow = true;
+            scene.add(segment);
+            roadSegments.push(segment);
+
+            // Center Lines (Dashed)
+            const lineLength = 4;
+            const lineGap = 4;
+            const numLines = roadLength / (lineLength + lineGap);
+            const lineGeometry = new THREE.PlaneGeometry(0.3, lineLength);
+            const lineMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff }); // White lines
+            for (let i = 0; i < numLines; i++) {
+                const line = new THREE.Mesh(lineGeometry, lineMaterial);
+                line.rotation.x = -Math.PI / 2;
+                line.position.set(0, 0.01, zPosition - roadLength / 2 + (lineLength + lineGap) * i + lineLength / 2);
+                line.receiveShadow = true; // Lines can receive shadows slightly
+                scene.add(line);
+                centerLines.push(line);
+            }
+
+             // Edge Strips
+            const stripGeometry = new THREE.PlaneGeometry(0.5, roadLength);
+            const redMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Red
+            const greenMaterial = new THREE.MeshStandardMaterial({ color: 0x00cc00 }); // Brighter Green
+
+            const stripLeft = new THREE.Mesh(stripGeometry, redMaterial);
+            stripLeft.rotation.x = -Math.PI / 2;
+            stripLeft.position.set(-roadWidth / 2 - 0.25, 0.01, zPosition);
+            stripLeft.receiveShadow = true;
+            scene.add(stripLeft);
+            edgeStripsLeft.push(stripLeft);
+
+            const stripRight = new THREE.Mesh(stripGeometry, greenMaterial);
+            stripRight.rotation.x = -Math.PI / 2;
+            stripRight.position.set(roadWidth / 2 + 0.25, 0.01, zPosition);
+            stripRight.receiveShadow = true;
+            scene.add(stripRight);
+            edgeStripsRight.push(stripRight);
+        }
+
+        // NEW: Function to create grass segments
+        function createGrassSegment(zPosition) {
+            const grassGeometry = new THREE.PlaneGeometry(grassWidth, roadLength);
+            const grassMaterial = new THREE.MeshStandardMaterial({ color: 0x55aa55, side: THREE.DoubleSide }); // Grass green
+
+            // Left Grass Plane
+            const grassLeft = new THREE.Mesh(grassGeometry, grassMaterial);
+            grassLeft.rotation.x = -Math.PI / 2;
+            // Position it next to the road edge strip, centered along the Z axis of the segment
+            grassLeft.position.set(-(roadWidth / 2 + 0.5 + grassWidth / 2), 0, zPosition);
+            grassLeft.receiveShadow = true;
+            scene.add(grassLeft);
+            grassSegmentsLeft.push(grassLeft);
+
+            // Right Grass Plane
+            const grassRight = new THREE.Mesh(grassGeometry, grassMaterial);
+            grassRight.rotation.x = -Math.PI / 2;
+            grassRight.position.set(roadWidth / 2 + 0.5 + grassWidth / 2, 0, zPosition);
+            grassRight.receiveShadow = true;
+            scene.add(grassRight);
+            grassSegmentsRight.push(grassRight);
+        }
+
+        // MODIFIED: Create initial road AND grass
+        function createInitialRoadAndGrass() {
+             for (let i = 0; i < 3; i++) { // Create 3 segments initially
+                 const zPos = -i * roadLength;
+                 createRoadSegment(zPos);
+                 createGrassSegment(zPos); // Also create grass
+             }
+        }
+
+
+        function createPlayerCar() {
+            const carBodyGeometry = new THREE.BoxGeometry(2.2, 1.2, 4.5);
+            const carBodyMaterial = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.3, metalness: 0.2 });
+            playerCar = new THREE.Mesh(carBodyGeometry, carBodyMaterial);
+            playerCar.position.set(0, 0.6, camera.position.z - 12); // Y position based on geometry height / 2
+            playerCar.castShadow = true;
+
+            // Add simple wheels (cylinders)
+            const wheelRadius = 0.4;
+            const wheelThickness = 0.3;
+            const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelThickness, 16);
+            const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+
+            const wheelPositions = [
+                { x: -1.1, y: -0.2, z: 1.5 }, // Front Left
+                { x: 1.1, y: -0.2, z: 1.5 },  // Front Right
+                { x: -1.1, y: -0.2, z: -1.5 }, // Rear Left
+                { x: 1.1, y: -0.2, z: -1.5 }   // Rear Right
+            ];
+
+            wheelPositions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+                wheel.rotation.z = Math.PI / 2; // Rotate to stand upright
+                wheel.position.set(pos.x, pos.y, pos.z);
+                wheel.castShadow = true;
+                playerCar.add(wheel); // Add wheels as children of the car body
+            });
+
+            scene.add(playerCar);
+
+            playerCar.userData.boundingBox = new THREE.Box3().setFromObject(playerCar);
+             // const boxHelper = new THREE.Box3Helper(playerCar.userData.boundingBox, 0xffff00);
+             // scene.add(boxHelper);
+        }
+
+        function spawnEnemyCar() {
+            const carGeometry = new THREE.BoxGeometry(2.2, 1.2, 4.5); // Similar size to player
+            const carMaterial = new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.4 }); // Red enemy
+            const enemy = new THREE.Mesh(carGeometry, carMaterial);
+
+            const lane = Math.random() < 0.5 ? -roadWidth / 4 : roadWidth / 4;
+             // Ensure Y position matches player car's base height + half of its own height
+            enemy.position.set(lane, 0.6, camera.position.z - enemySpawnDistance - Math.random() * 50);
+            enemy.castShadow = true;
+            enemy.userData.boundingBox = new THREE.Box3().setFromObject(enemy);
+            scene.add(enemy);
+            enemyCars.push(enemy);
+        }
+
+        function spawnPoint() {
+            const pointGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 16);
+            const pointMaterial = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.5, roughness: 0.3 }); // Shinier Gold
+            const point = new THREE.Mesh(pointGeometry, pointMaterial);
+            point.rotation.x = Math.PI / 2;
+
+            const laneX = (Math.random() - 0.5) * (roadWidth * 0.8);
+            point.position.set(laneX, 0.4, camera.position.z - pointSpawnDistance - Math.random() * 30); // Slightly above ground
+            point.castShadow = true;
+            point.userData.boundingBox = new THREE.Box3().setFromObject(point);
+            scene.add(point);
+            points.push(point);
+        }
+
+        // MODIFIED: Spawn Building with simple roof and trigger tree spawn
+        function spawnBuilding(side) {
+             const height = Math.random() * 30 + 15; // Min height 15
+             const width = Math.random() * 8 + 6;
+             const depth = Math.random() * 8 + 6;
+             const buildingBaseGeometry = new THREE.BoxGeometry(width, height, depth);
+             // More realistic building colors (grays, browns, muted tones)
+             const colors = [0xaaaaaa, 0xbbbbbb, 0xcccccc, 0x888888, 0x998877, 0xaabbcc];
+             const buildingMaterial = new THREE.MeshStandardMaterial({
+                 color: colors[Math.floor(Math.random() * colors.length)],
+                 roughness: 0.8 // Buildings are usually rough
+             });
+             const building = new THREE.Mesh(buildingBaseGeometry, buildingMaterial);
+
+             const xPos = side * (roadWidth / 2 + grassWidth / 2 - width/2 + (Math.random() - 0.5) * (grassWidth - width - 5) ); // Position within the grass area
+             const zPos = camera.position.z - buildingSpawnDistance - Math.random() * 100;
+
+             building.position.set(xPos, height / 2, zPos); // Base on the ground (Y=0) + height/2
+             building.castShadow = true;
+             building.receiveShadow = true; // Buildings can receive shadows too
+             scene.add(building);
+             buildings.push(building);
+
+             // Add a simple roof structure
+             const roofHeight = 0.5;
+             const roofGeometry = new THREE.BoxGeometry(width + 0.5, roofHeight, depth + 0.5); // Slightly larger
+             const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x555555 }); // Darker roof
+             const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+             roof.position.set(xPos, height + roofHeight / 2, zPos); // Position on top of the base
+             roof.castShadow = true;
+             scene.add(roof);
+             buildings.push(roof); // Add roof to array for cleanup
+
+             // Spawn 1 or 2 trees near the building
+             spawnTree(side, xPos + (Math.random()-0.5)*width, zPos + (Math.random()-0.5)*depth);
+              if (Math.random() < 0.5) {
+                  spawnTree(side, xPos + (Math.random()-0.5)*width, zPos + (Math.random()-0.5)*depth);
+              }
+        }
+
+        // NEW: Function to spawn a tree
+        function spawnTree(side, nearbyX, nearbyZ) {
+            const trunkHeight = Math.random() * 4 + 3; // 3m to 7m
+            const trunkRadius = 0.2 + Math.random() * 0.2;
+            const foliageHeight = trunkHeight * 1.5 + Math.random() * 2;
+            const foliageRadius = trunkRadius * 5 + Math.random() * 2;
+
+            // Trunk
+            const trunkGeometry = new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkHeight, 8);
+            const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9 }); // SaddleBrown
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+
+            // Foliage (Cone)
+            const foliageGeometry = new THREE.ConeGeometry(foliageRadius, foliageHeight, 16);
+            const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.8 }); // ForestGreen
+            const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
+
+            // Position the tree
+            // Place slightly away from the building's exact coords, on the grass
+            const treeX = nearbyX + (Math.random() - 0.5) * 10; // Random offset near building X
+            const treeZ = nearbyZ + (Math.random() - 0.5) * 10; // Random offset near building Z
+
+            // Ensure tree X stays on the correct side of the road within grass bounds
+            const minX = side * (roadWidth / 2 + 1);
+            const maxX = side * (roadWidth / 2 + grassWidth - foliageRadius);
+            const clampedX = Math.max(Math.min(treeX, maxX), minX) * side; // Clamp based on side
+
+            trunk.position.set(clampedX, trunkHeight / 2, treeZ);
+            foliage.position.set(clampedX, trunkHeight + foliageHeight / 2 - 0.5, treeZ); // Position foliage above trunk
+
+            trunk.castShadow = true;
+            foliage.castShadow = true;
+            trunk.receiveShadow = true; // Ground part of trunk might receive shadows
+
+            scene.add(trunk);
+            scene.add(foliage);
+            trees.push(trunk);
+            trees.push(foliage); // Add both parts for cleanup
+        }
+
+
+         function spawnStreetLight(side) {
+             const poleHeight = 8;
+             const poleRadius = 0.15;
+             const poleGeometry = new THREE.CylinderGeometry(poleRadius, poleRadius, poleHeight, 8);
+             const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.5, roughness: 0.5 }); // Metallic grey
+             const lightPole = new THREE.Mesh(poleGeometry, poleMaterial);
+
+             const xPos = side * (roadWidth / 2 + 1.5); // Close to road edge on grass
+             const zPos = camera.position.z - buildingSpawnDistance - Math.random() * 50;
+
+             lightPole.position.set(xPos, poleHeight / 2, zPos);
+             lightPole.castShadow = true;
+             scene.add(lightPole);
+             streetLights.push(lightPole);
+
+             // Add a simple "light bulb" fixture
+             const fixtureGeometry = new THREE.BoxGeometry(0.3, 0.3, 1);
+             const fixtureMaterial = new THREE.MeshStandardMaterial({ color: 0x444444 });
+             const fixture = new THREE.Mesh(fixtureGeometry, fixtureMaterial);
+             // Position it extending from the top of the pole
+             fixture.position.set(xPos + side * 0.3 , poleHeight - 0.3, zPos);
+             scene.add(fixture);
+             streetLights.push(fixture);
+
+             const bulbGeometry = new THREE.SphereGeometry(0.2);
+             const bulbMaterial = new THREE.MeshBasicMaterial({ color: 0xffffdd }); // Light yellow glow
+             const bulb = new THREE.Mesh(bulbGeometry, bulbMaterial);
+             bulb.position.set(xPos + side * 0.3, poleHeight - 0.6, zPos); // Under fixture
+             scene.add(bulb);
+             streetLights.push(bulb);
+         }
+
+         // Basic Traffic Light (no change from previous)
+         function spawnTrafficLight(side) {
+             const boxHeight = 2.5;
+             const boxWidth = 1;
+             const boxDepth = 1;
+             const boxGeometry = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
+             const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+             const lightBox = new THREE.Mesh(boxGeometry, boxMaterial);
+
+             const xPos = side * (roadWidth / 2 + 3);
+             const zPos = camera.position.z - buildingSpawnDistance - Math.random() * 80;
+
+             lightBox.position.set(xPos, 5, zPos);
+             lightBox.castShadow = true;
+             scene.add(lightBox);
+             trafficLights.push(lightBox);
+
+             const lightRadius = 0.3;
+             const redGeo = new THREE.SphereGeometry(lightRadius);
+             const redMat = new THREE.MeshBasicMaterial({ color: 0xff0000});
+             const redLight = new THREE.Mesh(redGeo, redMat);
+             redLight.position.set(xPos, 5 + boxHeight/2 - lightRadius - 0.2, zPos + boxDepth/2 + 0.01);
+             scene.add(redLight);
+             trafficLights.push(redLight);
+         }
+
+         function createInitialScenery() {
+             for (let i = 0; i < 15; i++) { // Spawn more initial items
+                 if (Math.random() < 0.7) spawnBuilding(Math.random() < 0.5 ? -1 : 1); // Higher chance of buildings
+                  if (Math.random() < 0.3) spawnStreetLight(Math.random() < 0.5 ? -1 : 1);
+                  if (Math.random() < 0.1) spawnTrafficLight(Math.random() < 0.5 ? -1 : 1);
+             }
+         }
+
+        // --- Game Logic ---
+
+        function updatePlayerPosition() {
+            const moveSpeed = 0.25; // Slightly faster movement
+            const maxPosX = roadWidth / 2 - playerCar.geometry.parameters.width / 2; // Keep car body on road
+
+            if (keys.left && playerCar.position.x > -maxPosX) {
+                playerCar.position.x -= moveSpeed;
+                 playerCar.rotation.z = Math.PI / 16; // Tilt slightly when turning left
+            } else if (keys.right && playerCar.position.x < maxPosX) {
+                playerCar.position.x += moveSpeed;
+                playerCar.rotation.z = -Math.PI / 16; // Tilt slightly when turning right
+            } else {
+                 playerCar.rotation.z = 0; // Straighten out
+            }
+        }
+
+        function updateCamera() {
+            camera.position.z -= gameSpeed;
+            playerCar.position.z = camera.position.z - 12; // Keep player relative distance
+        }
+
+        // MODIFIED: Update road AND grass recycling
+        function updateRoadAndGrass() {
+            // Check if the first road segment is behind the camera
+            const checkPos = camera.position.z + roadLength / 2 + 50; // Check slightly further ahead
+
+            if (roadSegments[0] && roadSegments[0].position.z > checkPos) {
+                // Move Road
+                const segmentToMove = roadSegments.shift();
+                segmentToMove.position.z -= roadSegments.length * roadLength + roadLength;
+                roadSegments.push(segmentToMove);
+
+                // Move associated Lines
+                const numLinesPerSegment = centerLines.length / roadSegments.length; // Approx
+                for(let i=0; i<numLinesPerSegment; i++) {
+                    if (!centerLines.length) break;
+                    const line = centerLines.shift();
+                    // Recalculate Z position based on the *new* segment's Z
+                    const lineIndex = i % numLinesPerSegment; // Index within the segment
+                    line.position.z = segmentToMove.position.z - roadLength / 2 + (line.geometry.parameters.height + 4) * lineIndex + line.geometry.parameters.height / 2;
+                    centerLines.push(line);
+                }
+
+                // Move Edge Strips
+                const stripLeft = edgeStripsLeft.shift();
+                stripLeft.position.z = segmentToMove.position.z;
+                edgeStripsLeft.push(stripLeft);
+                const stripRight = edgeStripsRight.shift();
+                stripRight.position.z = segmentToMove.position.z;
+                edgeStripsRight.push(stripRight);
+
+                // Move Grass Segments
+                const grassLeft = grassSegmentsLeft.shift();
+                grassLeft.position.z = segmentToMove.position.z;
+                grassSegmentsLeft.push(grassLeft);
+                const grassRight = grassSegmentsRight.shift();
+                grassRight.position.z = segmentToMove.position.z;
+                grassSegmentsRight.push(grassRight);
+            }
+        }
+
+
+        function updateObjects() {
+            const removalDistance = camera.position.z + 50; // Remove objects further behind
+
+            // Update and Remove Enemies
+            for (let i = enemyCars.length - 1; i >= 0; i--) {
+                const enemy = enemyCars[i];
+                enemy.position.z += gameSpeed * 0.65; // Adjust relative speed if needed
+                enemy.userData.boundingBox.setFromObject(enemy);
+
+                if (enemy.position.z > removalDistance) {
+                    scene.remove(enemy);
+                    enemyCars.splice(i, 1);
+                }
+            }
+
+            // Update and Remove Points
+            for (let i = points.length - 1; i >= 0; i--) {
+                const point = points[i];
+                point.position.z += gameSpeed;
+                point.rotation.y += 0.08; // Spin around Y axis
+                point.userData.boundingBox.setFromObject(point);
+
+                if (point.position.z > removalDistance) {
+                    scene.remove(point);
+                    points.splice(i, 1);
+                }
+            }
+
+             // Update and Remove Scenery (Buildings, Trees, Lights)
+            [buildings, trees, streetLights, trafficLights].forEach(arr => {
+                 for (let i = arr.length - 1; i >= 0; i--) {
+                    const obj = arr[i];
+                     obj.position.z += gameSpeed;
+                     if (obj.position.z > removalDistance) {
+                         scene.remove(obj);
+                         arr.splice(i, 1);
+                     }
+                 }
+            });
+
+
+            // --- Spawning --- (Adjust spawn rates)
+            if (enemyCars.length < 10 && Math.random() < 0.015) spawnEnemyCar(); // Limit max enemies
+            if (points.length < 15 && Math.random() < 0.02) spawnPoint();
+            if (buildings.length < 50 && Math.random() < 0.01) spawnBuilding(Math.random() < 0.5 ? -1 : 1); // Buildings trigger trees
+            if (streetLights.length < 20 && Math.random() < 0.008) spawnStreetLight(Math.random() < 0.5 ? -1 : 1);
+            if (trafficLights.length < 10 && Math.random() < 0.003) spawnTrafficLight(Math.random() < 0.5 ? -1 : 1);
+
+             // Optional: Gradually increase speed
+             gameSpeed = Math.min(gameSpeed + 0.00005, 1.5); // Increase speed but cap it
+        }
+
+        function checkCollisions() {
+            playerCar.userData.boundingBox.setFromObject(playerCar);
+
+            // Player vs Enemy
+            for (let i = 0; i < enemyCars.length; i++) {
+                const enemy = enemyCars[i];
+                if (playerCar.userData.boundingBox.intersectsBox(enemy.userData.boundingBox)) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            // Player vs Point
+            for (let i = points.length - 1; i >= 0; i--) {
+                const point = points[i];
+                if (playerCar.userData.boundingBox.intersectsBox(point.userData.boundingBox)) {
+                    score++;
+                    scoreElement.textContent = score;
+                    scene.remove(point);
+                    points.splice(i, 1);
+                }
+            }
+        }
+
+        function gameOver() {
+            if (isGameOver) return;
+            isGameOver = true;
+            finalScoreElement.textContent = score;
+            gameOverScreen.style.display = 'block';
+            // Maybe add a small shake effect
+            // let shakeIntensity = 0.1; ... animate shake
+        }
+
+        function restartGame() {
+            score = 0;
+            gameSpeed = 0.5;
+            isGameOver = false;
+            keys = { left: false, right: false };
+            scoreElement.textContent = score;
+            gameOverScreen.style.display = 'none';
+
+            // Remove existing dynamic objects more comprehensively
+            [enemyCars, points, buildings, trees, streetLights, trafficLights].forEach(arr => {
+                 arr.forEach(obj => { if (obj.parent) obj.parent.remove(obj); }); // Remove from scene safely
+                 arr.length = 0;
+            });
+
+            playerCar.position.set(0, 0.6, camera.position.z - 12); // Reset player
+            playerCar.rotation.set(0,0,0); // Reset tilt
+
+            camera.position.set(0, 6, 18); // Reset camera position
+
+            // Remove and recreate road and grass segments
+             [roadSegments, centerLines, edgeStripsLeft, edgeStripsRight, grassSegmentsLeft, grassSegmentsRight].forEach(arr => {
+                 arr.forEach(obj => { if (obj.parent) obj.parent.remove(obj); });
+                 arr.length = 0;
+             });
+             createInitialRoadAndGrass(); // Recreate road and grass
+             createInitialScenery(); // Recreate initial buildings/trees etc.
+
+            // Ensure animation loop continues
+            if (!renderer.info.render.frame && !isGameOver) {
+                 animate();
+             }
+        }
+
+
+        // --- Event Handlers ---
+        function onKeyDown(event) {
+            if (isGameOver) return;
+            switch (event.key) {
+                case 'ArrowLeft': case 'a': keys.left = true; break;
+                case 'ArrowRight': case 'd': keys.right = true; break;
+            }
+        }
+        function onKeyUp(event) {
+             if (isGameOver) return;
+            switch (event.key) {
+                case 'ArrowLeft': case 'a': keys.left = false; break;
+                case 'ArrowRight': case 'd': keys.right = false; break;
+            }
+        }
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+             // The requestAnimationFrame should always run to allow restart
+             requestAnimationFrame(animate);
+
+            if (isGameOver) {
+                 // Only render the scene in game over state
+                 renderer.render(scene, camera);
+                 return; // Don't run game logic updates
+            }
+
+            updatePlayerPosition();
+            updateCamera();
+            updateRoadAndGrass(); // Use the combined update function
+            updateObjects();
+            checkCollisions();
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Start the game ---
+        init();
+
+    </script>
+</body>
+</html>
